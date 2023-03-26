@@ -116,9 +116,9 @@ def oldgrad_huber(x, l, d):
 ########################################################################
 
 # rounds R values absolutely below d to zero
-def threshold(R, d): 
-    #print(f"{np.sum(np.abs(R)<d)} entries of R are close to 0 (below {d}) before applying high pass filter.")
-    return R-(np.abs(R)<d)*R
+def threshold(R, t): 
+    #print(f"{np.sum(np.abs(R)<t)} entries of R are close to 0 (below {t}) before applying high pass filter.")
+    return R-(np.abs(R)<=t)*R
 
 # prints number of non zero coordinates of R for each column, rank.
 def print_info(R):
@@ -133,13 +133,48 @@ def print_info(R):
     print(f"Matrix R has rank {np.linalg.matrix_rank(R)}")
     return 0
 
-# plot values
-def plot(vals, maxy):
+# plot values and save figure.
+def plot(vals, maxy, save=False):
     plt.plot(vals)
     plt.axis([0,len(vals),0,maxy])
-    plt.savefig("values")
+    if save: plt.savefig("values")
     plt.show()
     return 0
+
+def biplot(thresholds, distances, nonzero, save=False):
+    plt.figure(1)
+
+    ax1=plt.subplot(211)
+    ax1.plot(thresholds, distances)
+    ax1.title.set_text("d(AR,v)")
+
+    ax2=plt.subplot(212)
+    ax2.plot(thresholds, nonzero)
+    ax2.set_ybound(upper=20)
+    ax2.title.set_text("Number of nonzero elements")
+
+    plt.show()
+    if save: plt.savefig("biplot")
+    return 0
+# increases the threshold applied to R little by little,
+# and recording d(AR, v) and the number of nonzero elements,
+# until the whole matrix is reduced to zero.
+def rolling_threshold(A,v,R):
+    thresholds=[]
+    distances=[]
+    nonzero=[]
+    d=len(R)
+    t=0
+    while np.any(R!=0):
+        thresholds.append(t)
+       
+        nonzero.append(np.sum(R!=0))
+        
+        distances.append(dist(A,v,R))
+    
+        t=np.min(np.abs(R[np.nonzero(R)]))
+        R=threshold(R,t)
+    return thresholds, distances, nonzero
 
 ########################################################################
 ######################## Starting functions ############################
@@ -273,14 +308,14 @@ def main(A, v, R0, opt_steps, tol):
     assert len(v)==n
     r1, r2=R0.shape
     assert r2==3 and r1==d
-    R0=rescale(R0)/2 # isgood
+    R0=rescale(R0) # not needed
 
     x0=optx(A,v,R0)
     M=[R0]
     p=[x0]
     vals=[f(A,v,R0,x0)]
     k=0
-    s=-1e-2 # starting step
+    s=-1e-2 # starting step, important choice
     stop=False
     while not stop:
         x=p[k]
@@ -292,16 +327,23 @@ def main(A, v, R0, opt_steps, tol):
         print(s)
         assert s<=0, "step size is positive?"
         
-        newR=rescale(R+s*G)*(1e-1) # this is a great idea
-
+        # scales to entries between -1/10 and 1/10,
+        # this should help the convergence of entries to 0.
+        # The number should be played with to truly understand its effect.
+        # This isn't very rigorous because dividing by the norm is a retraction for L² but not L^infty, I think.
+        # Also, if we retract, the gradient should also be projected to get the Riemaniann gradient on the manifold.
+        newR=rescale(R+s*G)/10
+        
         newx=optx(A,v,newR)
 
         M.append(newR)
         p.append(newx)
         vals.append(f(A,v,newR,newx))
-        
+
+        # because of the rescaling, it's not uncommon for val to increase
         if vals[k+1]>vals[k]:
             print("aïe")
+        
         stop=check_stop(vals,k,opt_steps,tol)
         
         k=k+1
@@ -333,22 +375,11 @@ print(f"Took {t} seconds.")
 # save R before high pass filter
 np.save("R3", R)
 
-# plot
-plot(vals, maxy=2*l)
+# plot values
+plot(vals, maxy=2*l, save=True)
 
-# high pass filter and rescale for R
-print(f"Distance to v before high pass filter on R: {dist(A,v,R)}.")
-R = threshold(R, 1e-3)
-R = rescale(R)
+# high pass filters
+thresholds, distances, nonzero = rolling_threshold(A,v,R)
 
-# print stuff yo
-
-#print(R)
-
-print(f"Objective values: {vals}")
-
-print(f"Distance to v after high pass filter on R: {dist(A,v,R)}.")
-
-print_info(R)
-
-
+# plot distances and number of nonzero elements of R w.r.t. thresholds
+biplot(thresholds, distances, nonzero)
