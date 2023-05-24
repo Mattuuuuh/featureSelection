@@ -30,7 +30,7 @@ class featureSelection:
 
         R0=self.R
         if R0 == None:
-            R0=self.start()
+            R0=self.start(A,v)
 
         t=time.time()
         self.R, self.x, self.vals = self.gradient_descent(A, v, R0, self.opt_step, self.tol)
@@ -140,14 +140,21 @@ class featureSelection:
     # Defines the starting R at the beginning of the optimization.
     # Many choices are available. R=0 and R=rand +/-1 are sensible choices.
     # TODO: try random bernoulli +-1 matrix many times
-    def start(self):
+    def start(self,A,v):
         d=self.d
 
         # all ones R0
         #R0=np.ones((d,3))
         
         # all zeros R0
+        #R0=np.zeros((d,self.num_features))
+        
+        # least squares solution giving a 1-dim best approximation
+        #R0 = x[:,np.newaxis]*np.ones(self.num_features)
+        x=np.linalg.lstsq(A,v, rcond=-1)[0]
         R0=np.zeros((d,self.num_features))
+        R0[:,0]=x
+        R0=self.retract(R0, 0, 0)
         return R0
 
     ########################################################################
@@ -182,7 +189,7 @@ class featureSelection:
     # d is the threshold at which the L¹ switches to a quadratic (differentiable) function around 0.
     # returns a matrix to be summed to get the loss.
     def huber(self, R, l, d):
-        return (l*np.abs(R) + l*d**2/2 / l*d)*(np.abs(R)>d) + (R**2 *l/2)*(np.abs(R)<=d)
+        return (l*np.abs(R) + l*d**2/2 - l*d)*(np.abs(R)>d) + (R**2 *l/2)*(np.abs(R)<=d)
 
     # huber gradient (simple derivative of huber loss)
     def grad_huber(self, R, l, d):
@@ -208,8 +215,21 @@ class featureSelection:
         G=2*G*x
 
         m=len(R)
-        G+=self.grad_huber(R, self.l, self.delta)
+        GH=self.grad_huber(R, self.l, self.delta)
+        G+=GH
         return G
+    
+    # projects M onto tangent space at R
+    def orth_proj(self, R, M):
+        return 1/2 * (M - R@M.T@R)
+
+    def riem_gradient(self,A,v,R,x):
+        G = self.orth_proj(R, self.eu_gradient(A,v,R,x))
+        return self.orth_proj(R, self.eu_gradient(A,v,R,x))
+
+    def retract(self,R,G,step):
+        Q=np.linalg.qr(R+step*G)[0]
+        return Q
 
     # Line search step.
     # This is the backtracking line search by Armijo (1966), see wiki.
@@ -230,12 +250,16 @@ class featureSelection:
         return s
 
     # Stop conditions in gradient descent.
-    def check_stop(self, vals,k,opt_steps,tol):
+    def check_stop(self,G,vals,k,opt_steps,tol):
         maxsteps=opt_steps
         print(f"Step: {k} / {maxsteps}")
-        if(np.abs(vals[k]-vals[k+1]) < tol):
-            print("Stop due to tolerance.")
+        if(np.linalg.norm(G) < tol):
+            print("Stop due to gradient tolerance.")
             return True
+        # outcommented for now
+        #if(np.abs(vals[k] - vals[k+1]) < tol):
+        #    print("Stop due to value tolerance.")
+        #    return True
         return k>=maxsteps 
 
     # Main optimizing function.
@@ -248,7 +272,7 @@ class featureSelection:
         assert len(v)==n
         r1, r2=R0.shape
         assert r2==self.num_features and r1==d
-        R0=self.rescale(R0) # not needed
+        #R0=self.rescale(R0) # not needed
 
         x0=self.optx(A,v,R0)
         M=[R0]
@@ -261,7 +285,8 @@ class featureSelection:
             x=p[k]
             R=M[k]
             
-            G=self.eu_gradient(A,v,R,x)
+            #G=self.eu_gradient(A,v,R,x)
+            G=self.riem_gradient(A,v,R,x)
 
             s=self.step(A,v,R,x,G,s)
             #print(s)
@@ -272,8 +297,9 @@ class featureSelection:
             # The number should be played with to truly understand its effect.
             # This isn't very rigorous because dividing by the norm is a retraction for L² but not L^infty, I think.
             # Also, if we retract, the gradient should also be projected to get the Riemaniann gradient on the manifold.
-            newR=self.rescale(R+s*G)/1
+            #newR=self.rescale(R+s*G)/1
             #newR=self.threshold(R,self.tol)
+            newR=self.retract(R,G,s)
 
             newx=self.optx(A,v,newR)
 
@@ -285,10 +311,10 @@ class featureSelection:
             #if vals[k+1]>vals[k]:
             #    print("aïe")
             
-            stop=self.check_stop(vals,k,opt_steps,tol)
+            stop=self.check_stop(G,vals,k,opt_steps,tol)
             
             k=k+1
-        R=M[k]
+        R=M[k-1]
         x=p[k]
         return R, x, np.array(vals)
 

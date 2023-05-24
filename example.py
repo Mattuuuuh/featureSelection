@@ -14,17 +14,18 @@ A, v= read("Regression.csv")
 # initializing featureSelection
 
 # increase huber_slope to add weight to the loss.
-# huber_slope gives the tradeoff between good approximation (low slope) and small number of nonzero coefficients (high slope)
-# values to try: 1e-5, 1, 5, 10.
+# huber_slope gives the tradeoff between good approximation of labels (low slope) and small number of nonzero coefficients (high slope)
+# huber_slope 0 should instantly output the optimal R (projecting v onto span(A) gives the best 1-dimensional subspace of A near v).
+# values to try: 0, 1e-5, 1, 100.
 
-# increase num_features to get better approximation, but slower runtime.
-# a higher number of features sometimes also converges quicker, however.
-# values to try: 3, 5, 10.
-model=featureSelection(huber_slope=1e-5, huber_cutoff=1e-5, opt_step=4e4, tol=1e-10, R_start=None, num_features=3)
+# increase num_features to get better approximation, but slower convergence rate.
+# this only makes sense if huber_slope is non-zero (and sufficiently big).
+model=featureSelection(huber_slope=1, huber_cutoff=1e-5, opt_step=10e3, tol=1e-10, R_start=None, num_features=3)
 
 # fit with feature matrix A, labels v
 model.fit(A, v)
 
+#print(model.R)
 # plot values of loss that was minimized
 model.plot()
 
